@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Groq from 'groq-sdk';
+import Groq, { toFile } from 'groq-sdk';
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -12,8 +12,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
     }
 
+    // Convert the Web File → Buffer → Groq Uploadable
+    // The Groq SDK needs toFile() in a Next.js server context
+    const arrayBuffer = await audioFile.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const uploadable = await toFile(buffer, 'recording.webm', {
+      type: 'audio/webm',
+    });
+
     const transcription = await groq.audio.transcriptions.create({
-      file: audioFile,
+      file: uploadable,
       model: 'whisper-large-v3',
       response_format: 'json',
       language: 'en',

@@ -8,40 +8,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No text provided' }, { status: 400 });
     }
 
-    const apiKey = process.env.ELEVENLABS_API_KEY;
+    const apiKey = process.env.UNREALSPEECH_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: 'ElevenLabs API key not configured' }, { status: 500 });
+      return NextResponse.json({ error: 'UNREALSPEECH_API_KEY not configured' }, { status: 500 });
     }
 
-    // Use a natural-sounding voice — "Rachel" (voice ID: 21m00Tcm4TlvDq8ikWAM)
-    // You can swap this voice ID with any ElevenLabs voice you prefer
-    const voiceId = process.env.ELEVENLABS_VOICE_ID ?? '21m00Tcm4TlvDq8ikWAM';
-
-    const response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-      {
-        method: 'POST',
-        headers: {
-          'xi-api-key': apiKey,
-          'Content-Type': 'application/json',
-          Accept: 'audio/mpeg',
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_turbo_v2_5', // fastest + high quality
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
-            style: 0.0,
-            use_speaker_boost: true,
-          },
-        }),
-      }
-    );
+    // Unreal Speech streaming endpoint
+    // Voice options: Scarlett, Dan, Will, Liv, Amy
+    const response = await fetch('https://api.v7.unrealspeech.com/stream', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        Text: text,
+        VoiceId: process.env.UNREALSPEECH_VOICE_ID ?? 'Scarlett',
+        Bitrate: '192k',
+        Speed: '0',
+        Pitch: '1',
+        Codec: 'libmp3lame',
+      }),
+    });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('[/api/tts] ElevenLabs error:', errText);
+      console.error('[/api/tts] Unreal Speech error:', errText);
       return NextResponse.json({ error: 'TTS generation failed' }, { status: 500 });
     }
 

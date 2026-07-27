@@ -43,6 +43,7 @@ export default function PersonaApp() {
 
   // ── Mode change ────────────────────────────────────────────────────────────
   const handleModeChange = useCallback((mode: ModeId) => {
+    stopListening();
     cancelSpeaking();
     setState({ ...initialState, mode });
   }, []);
@@ -69,102 +70,110 @@ export default function PersonaApp() {
     }
   }, []);
 
-  // ── Mic press — main interaction loop ─────────────────────────────────────
-  const handleMicPress = useCallback(async () => {
-    const { micState, mode, material, concepts, messages, sessionActive } = stateRef.current;
+  // ── Process transcript after speech recognition returns ───────────────────
+  const processTranscript = useCallback(async (transcript: string) => {
+    if (!transcript.trim()) {
+      setMicState('idle');
+      return;
+    }
+
+    const { mode, material, concepts, messages } = stateRef.current;
     const modeConfig = MODES[mode];
+
+    setMicState('thinking');
+    setError(null);
+
+    try {
+      // Build updated history with user message
+      const userMsg: Message = { role: 'user', content: transcript, timestamp: Date.now() };
+      const updatedHistory = [...messages, userMsg];
+      setState((s) => ({ ...s, messages: updatedHistory }));
+
+      // Get AI reply
+      const systemPrompt = modeConfig.buildSystemPrompt(material, concepts);
+      const reply = await sendMessage(updatedHistory, systemPrompt);
+
+      const aiMsg: Message = { role: 'assistant', content: reply, timestamp: Date.now() };
+      setState((s) => ({ ...s, messages: [...updatedHistory, aiMsg] }));
+
+      // Speak reply — with barge-in: if user speaks, cancel AI and process their input
+      setMicState('speaking');
+      await speak(
+        reply,
+        // onEnd — natural finish
+        () => setMicState('idle'),
+        // onInterrupt — user spoke over AI
+        (interruptTranscript) => {
+          if (interruptTranscript && interruptTranscript.trim().length > 3) {
+            // They said something meaningful — process it directly
+            processTranscript(interruptTranscript);
+          } else {
+            // Too short / noise — just go back to listening
+            setMicState('idle');
+          }
+        }
+      );
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
+      setMicState('idle');
+    }
+  }, []);
+
+  // ── Mic press ─────────────────────────────────────────────────────────────
+  const handleMicToggle = useCallback(() => {
+    const { micState, sessionActive } = stateRef.current;
+
+    // Stop listening if currently active
+    if (micState === 'listening') {
+      stopListening();
+      setMicState('idle');
+      return;
+    }
 
     if (micState !== 'idle') return;
 
     // Start session on first press
     if (!sessionActive) {
-      setState((s) => ({ ...s, sessionActive: true, messages: [] }));
+      setState((s) => ({ ...s, sessionActive: true }));
     }
 
-    // 1. Start listening
-    setMicState('listening');
     setError(null);
+    setMicState('listening');
 
-    try {
-      await startListening();
-    } catch {
-      setError('Microphone access denied. Please allow microphone access in Chrome.');
-      setMicState('idle');
-      return;
-    }
-
-    // 2. Wait for user to release (handled below via button click toggle)
-    // We auto-stop after holding — here we stop immediately on next click via a flag
-    // Actually: press once to START, press again to STOP
-    // This is handled by the toggle logic: if micState is 'listening', stop
-  }, []);
-
-  const handleMicStop = useCallback(async () => {
-    const { mode, material, concepts, messages } = stateRef.current;
-    const modeConfig = MODES[mode];
-
-    setMicState('thinking');
-
-    try {
-      // 3. Stop recording + transcribe via Groq Whisper
-      const transcript = await stopListening();
-
-      if (!transcript.trim()) {
+    startListening(
+      // onResult — speech recognised
+      (transcript) => {
+        processTranscript(transcript);
+      },
+      // onError
+      (errMsg) => {
+        setError(errMsg);
         setMicState('idle');
-        return;
       }
-
-      // 4. Build updated history
-      const userMsg: Message = { role: 'user', content: transcript, timestamp: Date.now() };
-      const updatedHistory = [...stateRef.current.messages, userMsg];
-      setState((s) => ({ ...s, messages: updatedHistory }));
-
-      // 5. Get AI reply
-      const systemPrompt = modeConfig.buildSystemPrompt(material, concepts);
-      const reply = await sendMessage(updatedHistory, systemPrompt);
-
-      const aiMsg: Message = { role: 'assistant', content: reply, timestamp: Date.now() };
-      const finalHistory = [...updatedHistory, aiMsg];
-      setState((s) => ({ ...s, messages: finalHistory }));
-
-      // 6. Speak reply
-      setMicState('speaking');
-      await speak(reply, () => setMicState('idle'));
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-      setMicState('idle');
-    }
-  }, []);
-
-  // Toggle: idle → listening, listening → stop+process
-  const handleMicToggle = useCallback(async () => {
-    const { micState } = stateRef.current;
-    if (micState === 'idle') {
-      await handleMicPress();
-    } else if (micState === 'listening') {
-      await handleMicStop();
-    }
-  }, [handleMicPress, handleMicStop]);
+    );
+  }, [processTranscript]);
 
   // ── End session + score ───────────────────────────────────────────────────
   const handleEndSession = useCallback(async () => {
     const { messages, mode } = stateRef.current;
     const modeConfig = MODES[mode];
 
+    stopListening();
+    cancelSpeaking();
+
     if (messages.length === 0) {
       setState(initialState);
       return;
     }
 
-    cancelSpeaking();
     setIsScoringLoading(true);
     setMicState('thinking');
 
     try {
       const scoreCard = await scoreSession(messages, modeConfig.scoringPrompt);
       setState((s) => ({ ...s, scoreCard, sessionActive: false, micState: 'idle' }));
-    } catch (err) {
+    } catch {
       setError('Failed to score session. Please try again.');
       setMicState('idle');
     } finally {
@@ -174,6 +183,7 @@ export default function PersonaApp() {
 
   // ── New session ───────────────────────────────────────────────────────────
   const handleNewSession = useCallback(() => {
+    stopListening();
     cancelSpeaking();
     setState((s) => ({
       ...initialState,
@@ -201,13 +211,11 @@ export default function PersonaApp() {
         }}
       />
 
-      {/* Top area: mode toggle */}
+      {/* Top: mode toggle + upload */}
       <div className="relative z-10 flex flex-col items-center gap-4 pt-10 w-full px-6">
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs font-bold tracking-[0.3em] uppercase" style={{ color: 'rgba(255,255,255,0.25)' }}>
-            Persona
-          </span>
-        </div>
+        <span className="text-xs font-bold tracking-[0.3em] uppercase" style={{ color: 'rgba(255,255,255,0.25)' }}>
+          Persona
+        </span>
 
         <ModeToggle
           current={mode}
@@ -215,7 +223,6 @@ export default function PersonaApp() {
           disabled={sessionActive || isProcessing}
         />
 
-        {/* File upload */}
         <FileUpload
           onExtracted={handleFileExtracted}
           concepts={concepts}
@@ -230,10 +237,17 @@ export default function PersonaApp() {
         <MicButton
           state={micState}
           onPress={handleMicToggle}
-          disabled={isProcessing && micState !== 'listening'}
+          disabled={isProcessing}
         />
 
-        {/* Session controls */}
+        {/* Tap-to-stop hint while listening */}
+        {micState === 'listening' && (
+          <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            tap again to stop
+          </p>
+        )}
+
+        {/* End session button */}
         {sessionActive && (
           <button
             id="end-session-btn"
@@ -250,7 +264,7 @@ export default function PersonaApp() {
           </button>
         )}
 
-        {/* Error */}
+        {/* Error display */}
         {error && (
           <div
             className="max-w-xs px-4 py-3 rounded-xl text-xs text-center"
@@ -265,24 +279,22 @@ export default function PersonaApp() {
         )}
       </div>
 
-      {/* Bottom right: transcript toggle */}
-      {messages.length > 0 && (
+      {/* Transcript toggle */}
+      {messages.length > 0 && !showTranscript && (
         <div className="fixed bottom-6 right-6 z-30">
-          {!showTranscript && (
-            <button
-              id="show-transcript-btn"
-              onClick={() => setShowTranscript(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 hover:scale-[1.02]"
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(255,255,255,0.4)',
-                backdropFilter: 'blur(12px)',
-              }}
-            >
-              ≡ Transcript
-            </button>
-          )}
+          <button
+            id="show-transcript-btn"
+            onClick={() => setShowTranscript(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 hover:scale-[1.02]"
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: 'rgba(255,255,255,0.4)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            ≡ Transcript
+          </button>
         </div>
       )}
 
