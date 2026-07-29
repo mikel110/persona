@@ -232,18 +232,22 @@ export async function speak(
         speakFallback(text, onEnd, onInterrupt).then(resolve);
       };
 
-      await audio.play();
-
-      // Enable barge-in detection as soon as audio starts
-      if (onInterrupt) {
-        startInterruptDetection((interruptText) => {
-          if (currentAudio) {
-            currentAudio.pause();
-            URL.revokeObjectURL(url);
-          }
-          finish(true, interruptText);
-        });
-      }
+      audio.play().then(() => {
+        // Enable barge-in detection as soon as audio starts
+        if (onInterrupt) {
+          startInterruptDetection((interruptText) => {
+            if (currentAudio) {
+              currentAudio.pause();
+              URL.revokeObjectURL(url);
+            }
+            finish(true, interruptText);
+          });
+        }
+      }).catch((err) => {
+        console.warn('[TTS] Audio play rejected (autoplay blocked?), falling back', err);
+        URL.revokeObjectURL(url);
+        speakFallback(text, onEnd, onInterrupt).then(resolve);
+      });
     } catch (err) {
       console.warn('[TTS] Error:', err);
       await speakFallback(text, onEnd, onInterrupt);
