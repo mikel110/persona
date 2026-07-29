@@ -2,16 +2,12 @@
 
 // ─── Speech Engine ─────────────────────────────────────────────────────────────
 // STT : Chrome Web Speech API (webkitSpeechRecognition) — zero latency, accurate
-// TTS : Unreal Speech API (/api/tts) — natural human voices
-// UX  : Barge-in / interrupt — while AI speaks, any user speech cancels it instantly
-
-// ── Internal state ─────────────────────────────────────────────────────────────
+// TTS : Unreal Speech API (/api/tts) — natural human voices with browser fallback
+// UX  : Gemini-style Barge-in — user voice cuts AI speech & seamlessly captures full turn
 
 let mainRecognition: any = null;       // main STT for user turns
 let interruptRecognition: any = null;  // background listener during AI speech
 let currentAudio: HTMLAudioElement | null = null;
-
-// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function getSpeechRecognition(): any {
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -21,9 +17,10 @@ function getSpeechRecognition(): any {
 
 export function startListening(
   onResult: (transcript: string) => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  prefix: string = ''
 ): void {
-  stopListening(); // clean up any previous session
+  stopListening();
 
   const SpeechRecognition = getSpeechRecognition();
   if (!SpeechRecognition) {
@@ -33,41 +30,94 @@ export function startListening(
 
   mainRecognition = new SpeechRecognition();
   mainRecognition.lang = 'en-US';
-  mainRecognition.continuous = false;
-  mainRecognition.interimResults = false;
+  mainRecognition.continuous = true;
+  mainRecognition.interimResults = true;
   mainRecognition.maxAlternatives = 1;
 
+  let silenceTimer: NodeJS.Timeout | null = null;
+  let finalTranscriptAccumulated = prefix ? prefix + ' ' : '';
+  let currentFullText = '';
+
   mainRecognition.onresult = (event: any) => {
-    const transcript = event.results[0][0].transcript;
-    onResult(transcript);
+    let interimTranscript = '';
+    let finalTranscript = '';
+
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+      }
+    }
+
+    if (finalTranscript) {
+      finalTranscriptAccumulated += finalTranscript + ' ';
+    }
+    
+    currentFullText = (finalTranscriptAccumulated + interimTranscript).trim();
+
+    if (silenceTimer) clearTimeout(silenceTimer);
+    
+    if (currentFullText) {
+      // Reset the silence countdown
+      silenceTimer = setTimeout(() => {
+        stopListening(); // This nullifies handlers so onend won't fire
+        onResult(currentFullText);
+      }, 2500); // 2.5 seconds of silence
+    }
   };
 
   mainRecognition.onerror = (event: any) => {
+    if (silenceTimer) clearTimeout(silenceTimer);
     if (event.error === 'no-speech') {
-      onError('No speech detected. Please try again.');
+      if (prefix) {
+        onResult(prefix.trim());
+      } else {
+        onError('No speech detected. Please try again.');
+      }
     } else if (event.error === 'not-allowed') {
       onError('Microphone access denied. Please allow it in Chrome settings.');
     } else if (event.error === 'aborted') {
-      // Silently ignore — user manually stopped
+      // User manually stopped or switched mode
     } else {
       onError(`Speech recognition error: ${event.error}`);
     }
   };
 
-  mainRecognition.start();
+  mainRecognition.onend = () => {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    if (currentFullText) {
+      onResult(currentFullText);
+    } else if (prefix) {
+      onResult(prefix.trim());
+    } else {
+      // In case it silently stops without throwing no-speech
+      onError('No speech detected. Please try again.');
+    }
+  };
+
+  try {
+    mainRecognition.start();
+  } catch (e) {
+    console.error('Error starting main recognition:', e);
+  }
 }
 
 export function stopListening(): void {
   if (mainRecognition) {
-    try { mainRecognition.stop(); } catch { /* ignore */ }
+    try {
+      mainRecognition.onresult = null;
+      mainRecognition.onerror = null;
+      mainRecognition.onend = null;
+      mainRecognition.abort();
+    } catch { /* ignore */ }
     mainRecognition = null;
   }
 }
 
-// ── Interrupt detection — runs while AI is speaking ───────────────────────────
-// Any voice input while AI speaks → immediately cancels TTS + calls onInterrupt
+// ── Interrupt detection — active while AI is speaking ─────────────────────────
 
-function startInterruptDetection(onInterrupt: (transcript?: string) => void): void {
+function startInterruptDetection(onInterrupt: (text: string) => void): void {
   stopInterruptDetection();
 
   const SpeechRecognition = getSpeechRecognition();
@@ -76,22 +126,24 @@ function startInterruptDetection(onInterrupt: (transcript?: string) => void): vo
   interruptRecognition = new SpeechRecognition();
   interruptRecognition.lang = 'en-US';
   interruptRecognition.continuous = true;
-  interruptRecognition.interimResults = true; // catch partial speech for instant response
+  interruptRecognition.interimResults = true;
 
   let interrupted = false;
 
   interruptRecognition.onresult = (event: any) => {
     if (interrupted) return;
-    interrupted = true;
 
-    // Capture whatever they said (may be partial)
+    // Check if there is actual non-empty interim transcript
     const results = event.results;
     const last = results[results.length - 1];
-    const transcript = last[0].transcript.trim();
+    const text = last?.[0]?.transcript?.trim();
 
-    stopInterruptDetection();
-    cancelSpeaking();
-    onInterrupt(transcript || undefined);
+    if (text && text.length > 0) {
+      interrupted = true;
+      stopInterruptDetection();
+      cancelSpeaking();
+      onInterrupt(text);
+    }
   };
 
   interruptRecognition.onerror = () => {
@@ -99,7 +151,6 @@ function startInterruptDetection(onInterrupt: (transcript?: string) => void): vo
   };
 
   interruptRecognition.onend = () => {
-    // Restart continuously until we stop it
     if (interruptRecognition && !interrupted) {
       try { interruptRecognition.start(); } catch { /* ignore */ }
     }
@@ -114,26 +165,37 @@ function startInterruptDetection(onInterrupt: (transcript?: string) => void): vo
 
 function stopInterruptDetection(): void {
   if (interruptRecognition) {
-    try { interruptRecognition.stop(); } catch { /* ignore */ }
+    try {
+      interruptRecognition.onresult = null;
+      interruptRecognition.onerror = null;
+      interruptRecognition.onend = null;
+      interruptRecognition.abort();
+    } catch { /* ignore */ }
     interruptRecognition = null;
   }
 }
 
-// ── TTS — Unreal Speech via /api/tts ──────────────────────────────────────────
+// ── TTS — Unreal Speech via /api/tts with Fallback ────────────────────────────
 
 export async function speak(
   text: string,
   onEnd?: () => void,
-  onInterrupt?: (transcript?: string) => void
+  onInterrupt?: (text: string) => void
 ): Promise<void> {
   cancelSpeaking();
 
   return new Promise(async (resolve) => {
-    const finish = (interrupted = false) => {
+    let finished = false;
+
+    const finish = (wasInterrupted = false, interruptText = '') => {
+      if (finished) return;
+      finished = true;
+
       stopInterruptDetection();
       currentAudio = null;
-      if (interrupted) {
-        // Don't call onEnd — caller handles interrupt separately
+
+      if (wasInterrupted) {
+        onInterrupt?.(interruptText);
       } else {
         onEnd?.();
       }
@@ -148,8 +210,8 @@ export async function speak(
       });
 
       if (!res.ok) {
-        console.warn('[TTS] API failed, falling back to browser TTS');
-        await speakFallback(text, onEnd);
+        console.warn('[TTS] API failed, using browser fallback');
+        await speakFallback(text, onEnd, onInterrupt);
         resolve();
         return;
       }
@@ -166,36 +228,34 @@ export async function speak(
 
       audio.onerror = () => {
         URL.revokeObjectURL(url);
-        console.warn('[TTS] Audio playback error, falling back to browser TTS');
-        speakFallback(text, onEnd).then(resolve);
+        console.warn('[TTS] Audio playback error, using browser fallback');
+        speakFallback(text, onEnd, onInterrupt).then(resolve);
       };
 
       await audio.play();
 
-      // Start barge-in detection as soon as audio starts playing
+      // Enable barge-in detection as soon as audio starts
       if (onInterrupt) {
-        startInterruptDetection((transcript) => {
-          // Immediately cancel audio
+        startInterruptDetection((interruptText) => {
           if (currentAudio) {
             currentAudio.pause();
             URL.revokeObjectURL(url);
           }
-          finish(true);
-          onInterrupt(transcript);
+          finish(true, interruptText);
         });
       }
     } catch (err) {
       console.warn('[TTS] Error:', err);
-      await speakFallback(text, onEnd);
+      await speakFallback(text, onEnd, onInterrupt);
       resolve();
     }
   });
 }
 
-// ── Fallback TTS (browser speechSynthesis) ────────────────────────────────────
+// ── Fallback TTS (Browser speechSynthesis) ────────────────────────────────────
 
 function getBestVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
+  const voices = window.speechSynthesis?.getVoices() ?? [];
   const preferred = ['Samantha', 'Google US English', 'Karen', 'Daniel', 'Google UK English Female'];
   for (const name of preferred) {
     const match = voices.find((v) => v.name === name);
@@ -204,10 +264,27 @@ function getBestVoice(): SpeechSynthesisVoice | null {
   return voices.find((v) => v.lang.startsWith('en')) ?? voices[0] ?? null;
 }
 
-async function speakFallback(text: string, onEnd?: () => void): Promise<void> {
+async function speakFallback(
+  text: string,
+  onEnd?: () => void,
+  onInterrupt?: (text: string) => void
+): Promise<void> {
   return new Promise((resolve) => {
     cancelSpeaking();
     const utterance = new SpeechSynthesisUtterance(text);
+
+    let finished = false;
+    const finish = (wasInterrupted = false, interruptText = '') => {
+      if (finished) return;
+      finished = true;
+      stopInterruptDetection();
+      if (wasInterrupted) {
+        onInterrupt?.(interruptText);
+      } else {
+        onEnd?.();
+      }
+      resolve();
+    };
 
     const doSpeak = () => {
       const voice = getBestVoice();
@@ -215,12 +292,21 @@ async function speakFallback(text: string, onEnd?: () => void): Promise<void> {
       utterance.rate = 1.05;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
-      utterance.onend = () => { onEnd?.(); resolve(); };
-      utterance.onerror = () => { onEnd?.(); resolve(); };
+
+      utterance.onend = () => finish(false);
+      utterance.onerror = () => finish(false);
+
       window.speechSynthesis.speak(utterance);
+
+      if (onInterrupt) {
+        startInterruptDetection((interruptText) => {
+          window.speechSynthesis.cancel();
+          finish(true, interruptText);
+        });
+      }
     };
 
-    const voices = window.speechSynthesis.getVoices();
+    const voices = window.speechSynthesis?.getVoices() ?? [];
     if (voices.length > 0) {
       doSpeak();
     } else {
@@ -242,11 +328,11 @@ export function cancelSpeaking(): void {
     currentAudio.pause();
     currentAudio = null;
   }
-  if (window.speechSynthesis?.speaking) {
+  if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) {
     window.speechSynthesis.cancel();
   }
 }
 
 export function isSpeaking(): boolean {
-  return (currentAudio !== null && !currentAudio.paused) || window.speechSynthesis?.speaking;
+  return (currentAudio !== null && !currentAudio.paused) || (typeof window !== 'undefined' && window.speechSynthesis?.speaking);
 }

@@ -2,7 +2,7 @@
 
 export type MicState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
-export type ModeId = 'debate' | 'time-traveler';
+export type ModeId = 'teach-it' | 'socratic';
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -38,6 +38,7 @@ export interface AppState {
   micState: MicState;
   material: string;         // raw extracted text
   concepts: string[];       // 5–8 key terms
+  coveredConcepts: string[]; // concepts confirmed covered by AI
   messages: Message[];      // full conversation history
   scoreCard: ScoreCard | null;
   sessionActive: boolean;
