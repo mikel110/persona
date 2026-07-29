@@ -1,10 +1,10 @@
 'use client';
 
 import { ModeId } from '@/types';
-import { debateMode } from '@/lib/modes/debate';
-import { timeTravelerMode } from '@/lib/modes/timeTraveler';
+import { teachItMode } from '@/lib/modes/teachIt';
+import { socraticMode } from '@/lib/modes/socratic';
 
-const modes = [debateMode, timeTravelerMode];
+const modes = [teachItMode, socraticMode];
 
 interface ModeToggleProps {
   current: ModeId;

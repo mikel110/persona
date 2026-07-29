@@ -1,7 +1,7 @@
 import type { ModeConfig } from '@/types';
 
-export const timeTravelerMode: ModeConfig = {
-  id: 'time-traveler',
+export const timeTravelerMode = {
+  id: 'time-traveler' as string,
   label: 'Time Traveler',
   description: 'Explain your material to someone from another era',
   requiresUpload: true,

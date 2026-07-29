@@ -13,7 +13,7 @@ const stateConfig = {
     ring: 'rgba(124, 58, 237, 0.3)',
     glow: 'rgba(124, 58, 237, 0.15)',
     icon: '🎙️',
-    label: 'Tap to speak',
+    label: 'Start conversation',
     animation: 'animate-breathe',
   },
   listening: {

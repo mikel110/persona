@@ -1,7 +1,7 @@
 import type { ModeConfig } from '@/types';
 
-export const debateMode: ModeConfig = {
-  id: 'debate',
+export const debateMode = {
+  id: 'debate' as string,
   label: 'Debate',
   description: 'Argue your stance — AI takes the opposite side',
   requiresUpload: true,

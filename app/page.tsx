@@ -6,20 +6,25 @@ import ModeToggle from '@/components/ModeToggle';
 import FileUpload from '@/components/FileUpload';
 import ScorecardOverlay from '@/components/ScorecardOverlay';
 import TranscriptPanel from '@/components/TranscriptPanel';
-import { debateMode } from '@/lib/modes/debate';
-import { timeTravelerMode } from '@/lib/modes/timeTraveler';
+import ConceptTracker from '@/components/ConceptTracker';
+import { teachItMode } from '@/lib/modes/teachIt';
+import { socraticMode } from '@/lib/modes/socratic';
 import { sendMessage } from '@/lib/chatEngine';
 import { scoreSession } from '@/lib/scoringEngine';
 import { startListening, stopListening, speak, cancelSpeaking } from '@/lib/speechEngine';
 import type { AppState, Message, ModeId } from '@/types';
 
-const MODES = { debate: debateMode, 'time-traveler': timeTravelerMode };
+const MODES = { 'teach-it': teachItMode, 'socratic': socraticMode };
+
+// Regex to extract [COVERED: concept_name] tags from AI replies
+const COVERED_REGEX = /\[COVERED:\s*([^\]]+)\]/gi;
 
 const initialState: AppState = {
-  mode: 'debate',
+  mode: 'teach-it',
   micState: 'idle',
   material: '',
   concepts: [],
+  coveredConcepts: [],
   messages: [],
   scoreCard: null,
   sessionActive: false,
@@ -41,6 +46,24 @@ export default function PersonaApp() {
   const setError = (error: string | null) =>
     setState((s) => ({ ...s, error }));
 
+  // ── Auto-resume listening after each AI turn ──────────────────────────────
+  const resumeListening = useCallback((prefix: string = '') => {
+    if (!stateRef.current.sessionActive) return;
+    setMicState('listening');
+    startListening(
+      (transcript) => processTranscript(transcript),
+      (errMsg) => {
+        if (errMsg.includes('No speech detected')) {
+          resumeListening(); // silently retry
+        } else {
+          setError(errMsg);
+          setMicState('idle');
+        }
+      },
+      prefix
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Mode change ────────────────────────────────────────────────────────────
   const handleModeChange = useCallback((mode: ModeId) => {
     stopListening();
@@ -51,11 +74,10 @@ export default function PersonaApp() {
   // ── File upload + concept extraction ──────────────────────────────────────
   const handleFileExtracted = useCallback(async (text: string, fileName: string) => {
     if (!text) {
-      setState((s) => ({ ...s, material: '', uploadedFileName: '', concepts: [] }));
+      setState((s) => ({ ...s, material: '', uploadedFileName: '', concepts: [], coveredConcepts: [] }));
       return;
     }
-    setState((s) => ({ ...s, material: text, uploadedFileName: fileName, isUploading: true, concepts: [] }));
-
+    setState((s) => ({ ...s, material: text, uploadedFileName: fileName, isUploading: true, concepts: [], coveredConcepts: [] }));
     try {
       const res = await fetch('/api/extract-concepts', {
         method: 'POST',
@@ -70,10 +92,10 @@ export default function PersonaApp() {
     }
   }, []);
 
-  // ── Process transcript after speech recognition returns ───────────────────
+  // ── Process transcript → LLM → parse coverage → speak → loop ─────────────
   const processTranscript = useCallback(async (transcript: string) => {
     if (!transcript.trim()) {
-      setMicState('idle');
+      resumeListening();
       return;
     }
 
@@ -84,75 +106,73 @@ export default function PersonaApp() {
     setError(null);
 
     try {
-      // Build updated history with user message
       const userMsg: Message = { role: 'user', content: transcript, timestamp: Date.now() };
       const updatedHistory = [...messages, userMsg];
       setState((s) => ({ ...s, messages: updatedHistory }));
 
-      // Get AI reply
       const systemPrompt = modeConfig.buildSystemPrompt(material, concepts);
-      const reply = await sendMessage(updatedHistory, systemPrompt);
+      const rawReply = await sendMessage(updatedHistory, systemPrompt);
 
-      const aiMsg: Message = { role: 'assistant', content: reply, timestamp: Date.now() };
-      setState((s) => ({ ...s, messages: [...updatedHistory, aiMsg] }));
+      // ── Parse [COVERED: concept] tags from AI reply ──────────────────────
+      const newlyCovered: string[] = [];
+      let match;
+      const regex = new RegExp(COVERED_REGEX.source, 'gi');
+      while ((match = regex.exec(rawReply)) !== null) {
+        newlyCovered.push(match[1].trim());
+      }
 
-      // Speak reply — with barge-in: if user speaks, cancel AI and process their input
+      // Strip tags from displayed/spoken text
+      const cleanReply = rawReply.replace(COVERED_REGEX, '').replace(/\n{3,}/g, '\n\n').trim();
+
+      const aiMsg: Message = { role: 'assistant', content: cleanReply, timestamp: Date.now() };
+      setState((s) => ({
+        ...s,
+        messages: [...updatedHistory, aiMsg],
+        // Merge newly covered concepts (de-duplicate, case-insensitive match)
+        coveredConcepts: newlyCovered.length > 0
+          ? [...new Set([
+              ...s.coveredConcepts,
+              // Match against exact concept names from the list (fuzzy match)
+              ...concepts.filter((c) =>
+                newlyCovered.some((n) => c.toLowerCase() === n.toLowerCase() || c.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(c.toLowerCase()))
+              ),
+            ])]
+          : s.coveredConcepts,
+      }));
+
       setMicState('speaking');
       await speak(
-        reply,
-        // onEnd — natural finish
-        () => setMicState('idle'),
-        // onInterrupt — user spoke over AI
-        (interruptTranscript) => {
-          if (interruptTranscript && interruptTranscript.trim().length > 3) {
-            // They said something meaningful — process it directly
-            processTranscript(interruptTranscript);
-          } else {
-            // Too short / noise — just go back to listening
-            setMicState('idle');
-          }
-        }
+        cleanReply,
+        () => resumeListening(),   // onEnd — auto-resume
+        (interruptText) => resumeListening(interruptText) // onInterrupt — barge-in → resume with captured words
       );
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
-      setMicState('idle');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Listening again...');
+      setTimeout(() => resumeListening(), 2000);
     }
-  }, []);
+  }, [resumeListening]);
 
-  // ── Mic press ─────────────────────────────────────────────────────────────
-  const handleMicToggle = useCallback(() => {
-    const { micState, sessionActive } = stateRef.current;
+  // ── Mic press — one tap starts the session ─────────────────────────────────
+  const handleMicPress = useCallback(() => {
+    const { sessionActive, micState } = stateRef.current;
+    if (sessionActive || micState !== 'idle') return;
 
-    // Stop listening if currently active
-    if (micState === 'listening') {
-      stopListening();
-      setMicState('idle');
-      return;
-    }
-
-    if (micState !== 'idle') return;
-
-    // Start session on first press
-    if (!sessionActive) {
-      setState((s) => ({ ...s, sessionActive: true }));
-    }
-
-    setError(null);
+    setState((s) => ({ ...s, sessionActive: true, error: null }));
     setMicState('listening');
 
     startListening(
-      // onResult — speech recognised
-      (transcript) => {
-        processTranscript(transcript);
-      },
-      // onError
+      (transcript) => processTranscript(transcript),
       (errMsg) => {
-        setError(errMsg);
-        setMicState('idle');
+        if (errMsg.includes('No speech detected')) {
+          resumeListening();
+        } else {
+          setError(errMsg);
+          setMicState('idle');
+        }
       }
     );
-  }, [processTranscript]);
+  }, [processTranscript, resumeListening]);
 
   // ── End session + score ───────────────────────────────────────────────────
   const handleEndSession = useCallback(async () => {
@@ -161,6 +181,7 @@ export default function PersonaApp() {
 
     stopListening();
     cancelSpeaking();
+    setState((s) => ({ ...s, sessionActive: false }));
 
     if (messages.length === 0) {
       setState(initialState);
@@ -194,7 +215,7 @@ export default function PersonaApp() {
     }));
   }, []);
 
-  const { mode, micState, concepts, isUploading, uploadedFileName, scoreCard, sessionActive, error, messages } = state;
+  const { mode, micState, concepts, coveredConcepts, isUploading, uploadedFileName, scoreCard, sessionActive, error, messages } = state;
   const isProcessing = micState === 'thinking' || micState === 'speaking' || isScoringLoading;
 
   return (
@@ -209,6 +230,13 @@ export default function PersonaApp() {
           background:
             'radial-gradient(ellipse 60% 40% at 50% 60%, rgba(124, 58, 237, 0.12) 0%, transparent 70%)',
         }}
+      />
+
+      {/* Live concept tracker — left side, only during active session */}
+      <ConceptTracker
+        concepts={concepts}
+        coveredConcepts={coveredConcepts}
+        isSessionActive={sessionActive}
       />
 
       {/* Top: mode toggle + upload */}
@@ -233,38 +261,47 @@ export default function PersonaApp() {
       </div>
 
       {/* Center: Mic button */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-4">
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center gap-6">
         <MicButton
           state={micState}
-          onPress={handleMicToggle}
-          disabled={isProcessing}
+          onPress={handleMicPress}
+          disabled={sessionActive}
         />
 
-        {/* Tap-to-stop hint while listening */}
-        {micState === 'listening' && (
-          <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
-            tap again to stop
+        {/* State hints */}
+        {!sessionActive && micState === 'idle' && (
+          <p className="text-xs tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            tap to begin
           </p>
         )}
 
-        {/* End session button */}
+        {sessionActive && (
+          <p className="text-xs tracking-widest uppercase animate-pulse" style={{ color: 'rgba(124, 58, 237, 0.6)' }}>
+            {micState === 'listening' ? 'speak anytime'
+              : micState === 'thinking' ? 'thinking...'
+              : micState === 'speaking' ? 'interrupt anytime'
+              : ''}
+          </p>
+        )}
+
+        {/* End session */}
         {sessionActive && (
           <button
             id="end-session-btn"
             onClick={handleEndSession}
-            disabled={isProcessing}
-            className="mt-4 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={isScoringLoading}
+            className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               background: 'rgba(255,255,255,0.05)',
               border: '1px solid rgba(255,255,255,0.1)',
-              color: 'rgba(255,255,255,0.6)',
+              color: 'rgba(255,255,255,0.5)',
             }}
           >
             {isScoringLoading ? 'Scoring...' : 'End Session'}
           </button>
         )}
 
-        {/* Error display */}
+        {/* Error */}
         {error && (
           <div
             className="max-w-xs px-4 py-3 rounded-xl text-xs text-center"
@@ -298,7 +335,6 @@ export default function PersonaApp() {
         </div>
       )}
 
-      {/* Overlays */}
       {showTranscript && (
         <TranscriptPanel messages={messages} onClose={() => setShowTranscript(false)} />
       )}
