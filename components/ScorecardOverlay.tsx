@@ -1,10 +1,12 @@
 'use client';
 
 import { ScoreCard } from '@/types';
+import { useRef, useState } from 'react';
 
 interface ScorecardOverlayProps {
   scoreCard: ScoreCard;
   onNewSession: () => void;
+  onClose: () => void;
 }
 
 function ScoreRing({ score }: { score: number }) {
@@ -32,14 +34,53 @@ function ScoreRing({ score }: { score: number }) {
   );
 }
 
-export default function ScorecardOverlay({ scoreCard, onNewSession }: ScorecardOverlayProps) {
+export default function ScorecardOverlay({ scoreCard, onNewSession, onClose }: ScorecardOverlayProps) {
+  const scorecardRef = useRef<HTMLDivElement>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const downloadPDF = async () => {
+    if (!scorecardRef.current) return;
+    try {
+      setIsDownloading(true);
+      const htmlToImage = await import('html-to-image');
+      const { jsPDF } = await import('jspdf');
+
+      // Temporarily hide the close/download buttons before capturing
+      const buttonsToHide = scorecardRef.current.querySelectorAll('.no-print');
+      buttonsToHide.forEach(el => (el as HTMLElement).style.display = 'none');
+
+      const node = scorecardRef.current;
+      const dataUrl = await htmlToImage.toPng(node, {
+        pixelRatio: 2,
+        backgroundColor: '#0a0a0a', // Dark theme background
+      });
+
+      // Restore buttons
+      buttonsToHide.forEach(el => (el as HTMLElement).style.display = '');
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'px',
+        format: [node.offsetWidth, node.offsetHeight]
+      });
+      
+      pdf.addImage(dataUrl, 'PNG', 0, 0, node.offsetWidth, node.offsetHeight);
+      pdf.save('Persona-Scorecard.pdf');
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(20px)' }}
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-8 flex flex-col gap-6"
+        ref={scorecardRef}
+        className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-8 flex flex-col gap-6"
         style={{
           background: 'rgba(255,255,255,0.04)',
           border: '1px solid rgba(255,255,255,0.1)',
@@ -47,8 +88,18 @@ export default function ScorecardOverlay({ scoreCard, onNewSession }: ScorecardO
           boxShadow: '0 0 80px rgba(124, 58, 237, 0.2)',
         }}
       >
+        <button
+          onClick={onClose}
+          className="no-print absolute top-6 right-6 w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-white/10 text-white/50 hover:text-white"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+
         {/* Header */}
-        <div className="text-center">
+        <div className="text-center mt-2">
           <p className="text-xs font-semibold tracking-widest uppercase mb-2" style={{ color: '#a78bfa' }}>
             Session Complete
           </p>
@@ -156,12 +207,28 @@ export default function ScorecardOverlay({ scoreCard, onNewSession }: ScorecardO
                 <p className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>Concept Delivery</p>
                 <div className="flex flex-wrap gap-2">
                   {scoreCard.fluencyStats.masteredConcepts.map(c => (
-                    <span key={c} className="text-[10px] px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span 
+                      key={c} 
+                      className="text-[10px] px-2 py-1 rounded-full border"
+                      style={{
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        color: '#34d399',
+                        borderColor: 'rgba(16, 185, 129, 0.2)'
+                      }}
+                    >
                       🟢 Mastered: {c}
                     </span>
                   ))}
                   {scoreCard.fluencyStats.shakyConcepts.map(c => (
-                    <span key={c} className="text-[10px] px-2 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    <span 
+                      key={c} 
+                      className="text-[10px] px-2 py-1 rounded-full border"
+                      style={{
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        color: '#fbbf24',
+                        borderColor: 'rgba(245, 158, 11, 0.2)'
+                      }}
+                    >
                       🟡 Shaky: {c}
                     </span>
                   ))}
@@ -198,18 +265,58 @@ export default function ScorecardOverlay({ scoreCard, onNewSession }: ScorecardO
           </div>
         </div>
 
-        {/* Action */}
-        <button
-          id="new-session-btn"
-          onClick={onNewSession}
-          className="w-full py-4 rounded-2xl font-semibold text-white transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
-          style={{
-            background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
-            boxShadow: '0 0 30px rgba(124, 58, 237, 0.4)',
-          }}
-        >
-          New Session
-        </button>
+        {/* Revision Q&A */}
+        {scoreCard.revisionQnA && scoreCard.revisionQnA.length > 0 && (
+          <div className="p-5 rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              Targeted Revision Q&A
+            </h3>
+            <div className="space-y-3">
+              {scoreCard.revisionQnA.map((qa, i) => (
+                <div key={i} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <p className="text-xs font-semibold text-white mb-1">Q: {qa.question}</p>
+                  <p className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>A: {qa.answer}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-4 no-print mt-2">
+          <button
+            onClick={downloadPDF}
+            disabled={isDownloading}
+            className="flex-1 py-4 rounded-2xl font-semibold text-white transition-all duration-300 hover:bg-white/10 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            {isDownloading ? 'Generating...' : 'Download PDF'}
+          </button>
+          <button
+            id="new-session-btn"
+            onClick={onNewSession}
+            className="flex-1 py-4 rounded-2xl font-semibold text-white transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+            style={{
+              background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
+              boxShadow: '0 0 30px rgba(124, 58, 237, 0.4)',
+            }}
+          >
+            New Session
+          </button>
+        </div>
       </div>
     </div>
   );

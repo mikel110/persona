@@ -10,6 +10,7 @@ let mediaRecorder: MediaRecorder | null = null;
 let audioChunks: BlobPart[] = [];
 let interruptRecognition: any = null;  // background listener during AI speech
 let currentAudio: HTMLAudioElement | null = null;
+let speakSessionId = 0;
 
 function getSpeechRecognition(): any {
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -190,6 +191,7 @@ export async function speak(
   onInterrupt?: (text: string) => void
 ): Promise<void> {
   cancelSpeaking();
+  const sessionId = speakSessionId;
 
   return new Promise(async (resolve) => {
     let finished = false;
@@ -217,13 +219,13 @@ export async function speak(
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
-        console.warn('[TTS] API failed, using browser fallback', errorText);
-        alert(`[TTS] Server Error: The TTS API returned ${res.status}. Falling back to robotic voice.`);
-        await speakFallback(text, onEnd, onInterrupt);
-        resolve();
+        if (sessionId !== speakSessionId) return resolve();
+        console.warn('[TTS] API failed, aborting speech entirely');
+        finish(false);
         return;
       }
+
+      if (sessionId !== speakSessionId) return resolve();
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -237,8 +239,8 @@ export async function speak(
 
       audio.onerror = () => {
         URL.revokeObjectURL(url);
-        console.warn('[TTS] Audio playback error, using browser fallback');
-        speakFallback(text, onEnd, onInterrupt).then(resolve);
+        console.warn('[TTS] Audio playback error, aborting speech entirely');
+        finish(false);
       };
 
       audio.play().then(() => {
@@ -253,16 +255,13 @@ export async function speak(
           });
         }
       }).catch((err) => {
-        console.warn('[TTS] Audio play rejected (autoplay blocked?), falling back', err);
-        alert(`[TTS] Audio play failed: ${err.message || err}. Falling back to robotic voice.`);
+        console.warn('[TTS] Audio play rejected (autoplay blocked?), aborting', err);
         URL.revokeObjectURL(url);
-        speakFallback(text, onEnd, onInterrupt).then(resolve);
+        finish(false);
       });
     } catch (err: any) {
       console.warn('[TTS] Error:', err);
-      alert(`[TTS] Fetch Error: ${err.message || err}. Falling back to robotic voice.`);
-      await speakFallback(text, onEnd, onInterrupt);
-      resolve();
+      finish(false);
     }
   });
 }
@@ -337,6 +336,7 @@ async function speakFallback(
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
 export function cancelSpeaking(): void {
+  speakSessionId++;
   stopInterruptDetection();
 
   if (currentAudio) {

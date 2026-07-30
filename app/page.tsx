@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import MicButton from '@/components/MicButton';
 import ModeToggle from '@/components/ModeToggle';
 import FileUpload from '@/components/FileUpload';
@@ -8,6 +9,7 @@ import ScorecardOverlay from '@/components/ScorecardOverlay';
 import TranscriptPanel from '@/components/TranscriptPanel';
 import ConceptTracker from '@/components/ConceptTracker';
 import HistoryPanel from '@/components/HistoryPanel';
+import LiveSubtitle from '@/components/LiveSubtitle';
 import { teachItMode } from '@/lib/modes/teachIt';
 import { quizzerMode } from '@/lib/modes/quizzer';
 import { sendMessage } from '@/lib/chatEngine';
@@ -42,6 +44,8 @@ export default function PersonaApp() {
   const [isScoringLoading, setIsScoringLoading] = useState(false);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [viewingFromHistory, setViewingFromHistory] = useState(false);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -74,7 +78,12 @@ export default function PersonaApp() {
 
   const handleSelectSession = useCallback((session: SavedSession) => {
     setState((s) => ({ ...s, scoreCard: session.scoreCard }));
+    setViewingFromHistory(true);
     setShowHistory(false);
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    setMousePos({ x: e.clientX, y: e.clientY });
   }, []);
 
   // ── Auto-resume listening after each AI turn ──────────────────────────────
@@ -128,7 +137,9 @@ export default function PersonaApp() {
 
   // ── Process transcript → LLM → parse coverage → speak → loop ─────────────
   const processTranscript = useCallback(async (transcript: string) => {
-    if (!transcript.trim()) {
+    // Filter out empty strings and common Whisper silence hallucinations (e.g. ".", "...", "!?")
+    const textOnly = transcript.replace(/[.,!?\s]/g, '');
+    if (textOnly.length === 0) {
       resumeListening();
       return;
     }
@@ -146,6 +157,9 @@ export default function PersonaApp() {
 
       const systemPrompt = modeConfig.buildSystemPrompt(material, concepts);
       const rawReply = await sendMessage(updatedHistory, systemPrompt);
+
+      // If the user clicked "End Session" while we were waiting for the LLM to reply, abort.
+      if (!stateRef.current.sessionActive) return;
 
       // ── Parse [COVERED: concept] tags from AI reply ──────────────────────
       const newlyCovered: string[] = [];
@@ -202,9 +216,23 @@ export default function PersonaApp() {
     }
   }, [resumeListening]);
 
-  // ── Mic press — one tap starts the session ─────────────────────────────────
+  // ── Mic press — one tap starts the session or interrupts speaking ──────────
   const handleMicPress = useCallback(() => {
     const { sessionActive, micState } = stateRef.current;
+    
+    // If AI is speaking, clicking the orb will cut it off and start listening
+    if (sessionActive && micState === 'speaking') {
+      cancelSpeaking();
+      resumeListening();
+      return;
+    }
+
+    // If currently listening, clicking the orb manually forces it to stop and process the audio
+    if (sessionActive && micState === 'listening') {
+      stopListening();
+      return;
+    }
+
     if (sessionActive || micState !== 'idle') return;
 
     setState((s) => ({ ...s, sessionActive: true, error: null }));
@@ -257,6 +285,7 @@ export default function PersonaApp() {
         return updated;
       });
 
+      setViewingFromHistory(false);
       setState((s) => ({ ...s, scoreCard, sessionActive: false, micState: 'idle' }));
     } catch (err) {
       console.error(err);
@@ -287,13 +316,13 @@ export default function PersonaApp() {
     <main
       className="relative min-h-screen flex flex-col items-center overflow-hidden"
       style={{ background: '#0a0a0f' }}
+      onMouseMove={handleMouseMove}
     >
       {/* Background radial glow */}
       <div
-        className="pointer-events-none absolute inset-0"
+        className="pointer-events-none absolute inset-0 transition-opacity duration-300"
         style={{
-          background:
-            'radial-gradient(ellipse 60% 40% at 50% 60%, rgba(124, 58, 237, 0.12) 0%, transparent 70%)',
+          background: `radial-gradient(800px circle at ${mousePos.x}px ${mousePos.y}px, rgba(124, 58, 237, 0.12), transparent 40%)`,
         }}
       />
 
@@ -331,24 +360,57 @@ export default function PersonaApp() {
         <MicButton
           state={micState}
           onPress={handleMicPress}
-          disabled={sessionActive}
         />
 
         {/* State hints */}
         {!sessionActive && micState === 'idle' && (
-          <p className="text-xs tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.2)' }}>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-xs tracking-widest uppercase"
+            style={{ color: 'rgba(255,255,255,0.2)' }}
+          >
             tap to begin
-          </p>
+          </motion.p>
         )}
 
-        {sessionActive && (
-          <p className="text-xs tracking-widest uppercase animate-pulse" style={{ color: 'rgba(124, 58, 237, 0.6)' }}>
-            {micState === 'listening' ? 'speak anytime'
-              : micState === 'thinking' ? 'thinking...'
-              : micState === 'speaking' ? 'interrupt anytime'
-              : ''}
-          </p>
-        )}
+        {/* Live Holographic Subtitles */}
+        <div className="h-20 flex items-center justify-center max-w-lg text-center px-4">
+          <AnimatePresence mode="wait">
+            {sessionActive && micState === 'speaking' && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+              <LiveSubtitle 
+                key={messages[messages.length - 1].timestamp} 
+                text={messages[messages.length - 1].content} 
+              />
+            )}
+            
+            {sessionActive && micState === 'listening' && (
+              <motion.p
+                key="listening-hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-xs tracking-widest uppercase animate-pulse"
+                style={{ color: 'rgba(16, 185, 129, 0.6)' }}
+              >
+                speak anytime (or tap orb to send)
+              </motion.p>
+            )}
+            
+            {sessionActive && micState === 'thinking' && (
+              <motion.p
+                key="thinking-hint"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-xs tracking-widest uppercase animate-pulse"
+                style={{ color: 'rgba(245, 158, 11, 0.6)' }}
+              >
+                thinking...
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* End session */}
         {sessionActive && (
@@ -434,7 +496,22 @@ export default function PersonaApp() {
       )}
 
       {scoreCard && (
-        <ScorecardOverlay scoreCard={scoreCard} onNewSession={handleNewSession} />
+        <ScorecardOverlay 
+          scoreCard={scoreCard} 
+          onNewSession={() => {
+            setViewingFromHistory(false);
+            handleNewSession();
+          }} 
+          onClose={() => {
+            if (viewingFromHistory) {
+              setState((s) => ({ ...s, scoreCard: null }));
+              setShowHistory(true);
+              setViewingFromHistory(false);
+            } else {
+              handleNewSession();
+            }
+          }}
+        />
       )}
     </main>
   );

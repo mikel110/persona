@@ -21,13 +21,16 @@ export async function POST(request: NextRequest) {
       type: 'audio/webm',
     });
 
-    const transcription = await groq.audio.transcriptions.create({
-      file: uploadable,
-      model: 'whisper-large-v3',
-      response_format: 'json',
-      language: 'en',
-      prompt: 'um, uh, like, you know, hmm, ah, er.', // Crucial: forces Whisper to keep filler words!
-    });
+    const transcription = await groq.audio.transcriptions.create(
+      {
+        file: uploadable,
+        model: 'whisper-large-v3',
+        response_format: 'json',
+        language: 'en',
+        prompt: 'um, uh, like, you know, hmm, ah, er.', // Crucial: forces Whisper to keep filler words!
+      },
+      { timeout: 60000, maxRetries: 2 } // Increased timeout to 60 seconds to prevent premature failure
+    );
 
     return NextResponse.json({ transcript: transcription.text });
   } catch (err) {
