@@ -25,6 +25,10 @@ export interface FluencyStats {
   masteredConcepts: string[];
   speechAnalysis: string;
 }
+export interface RevisionQnA {
+  question: string;
+  answer: string;
+}
 
 export interface ScoreCard {
   overallScore: number; // 0–10
@@ -33,6 +37,7 @@ export interface ScoreCard {
   strengths: string[];
   improvements: string[];
   fluencyStats?: FluencyStats;
+  revisionQnA?: RevisionQnA[];
 }
 
 export interface SavedSession {

@@ -17,7 +17,7 @@ YOUR RULES:
 1. Base your questions STRICTLY and ONLY on the material provided below. Do not ask about things outside the notes.
 2. Mix up the question types! Do not just ask for definitions. Use:
    - Direct questions.
-   - Fill-in-the-blank questions. (IMPORTANT: When asking these, literally say the word "blank" instead of using underscores or dashes. E.g., "The main advantage of React is the 'blank' DOM.")
+   - Fill-in-the-blank questions. (IMPORTANT: When asking these, literally say the word "blank" instead of using underscores or dashes.)
    - True/False questions.
 3. Ask EXACTLY ONE short question at a time. Wait for the user to answer.
 4. When they answer:
@@ -25,18 +25,17 @@ YOUR RULES:
    - If they are WRONG or incomplete: Say "Not quite. The correct answer is [X]". Add the [SHAKY] tag. Immediately ask the next question.
    - If they say "I DON'T KNOW" or "I'm not sure": Say "That's okay! The answer is [X]." Add the [SHAKY] tag. Immediately ask the next question.
 5. NEVER ask compound questions (e.g. "What is X and how does it relate to Y?"). Keep them single-focused.
-6. Do not use pleasantries (e.g. "Great job!", "Hello there!"). Just evaluate and move on.
+6. STRICT LENGTH LIMIT: Your entire response must be UNDER 4 SENTENCES total. Never ramble. Do not argue with yourself. Evaluate, then move on.
 
-CONCEPT COVERAGE:
-Do NOT mark a concept as [COVERED] just because they answered one question correctly! 
-You must ask at least 2 or 3 varied questions about a specific concept before you can be sure they actually know it.
-ONLY when they have successfully answered multiple questions about a core concept and proven full mastery, add this on its own final line:
-[COVERED: exact_concept_name]
+CONCEPT EVALUATION TAGS:
+When you evaluate the student's ANSWER to a previous question, you may optionally append ONE tag at the very end of your response to mark their mastery of that concept.
 
-If they answer incorrectly, hesitate heavily, or say they don't know, use this tag immediately (even on the first question):
-[SHAKY: exact_concept_name]
-
-Only one concept tag per response.
+RULES FOR TAGGING:
+1. NEVER output a tag when you are asking a new question for the first time. The student hasn't answered yet! You cannot evaluate what they haven't answered.
+2. ONLY output a tag AFTER evaluating the student's attempt to answer a question.
+3. If they answer incorrectly, hesitate heavily, or say they don't know, use: [SHAKY: exact_concept_name]
+4. If they successfully answer correctly and demonstrate mastery, use: [COVERED: exact_concept_name]
+5. Only tag the exact concept name from the tracking list. Only one tag per response.
 
 MATERIAL:
 ${material ? `Here are the notes to quiz them on:\n${material.slice(0, 4000)}` : 'CRITICAL ERROR: No material uploaded. Tell the user to upload notes.'}
@@ -69,7 +68,11 @@ Return a JSON object with EXACTLY this structure:
   },
   "strengths": ["<specific strength>", "<specific strength>"],
   "improvements": ["<specific actionable improvement>", "<specific actionable improvement>"],
-  "summary": "<2 sentences: what they nailed and what they need to review again>"
+  "summary": "<2 sentences: what they did well and what to study next>",
+  "revisionQnA": [
+    { "question": "<a specific question testing a concept they got wrong or missed>", "answer": "<the correct, concise answer to that question>" },
+    { "question": "<another question based on their weak points>", "answer": "<concise answer>" }
+  ]
 }
 
 Judge on: Their accuracy in answering the flashcard questions. If they got many wrong, their overallScore should reflect that. Return ONLY the JSON object, no extra text.`,

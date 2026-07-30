@@ -3,6 +3,7 @@
 import { ModeId } from '@/types';
 import { teachItMode } from '@/lib/modes/teachIt';
 import { quizzerMode } from '@/lib/modes/quizzer';
+import { motion } from 'framer-motion';
 
 const modes = [teachItMode, quizzerMode];
 
@@ -15,11 +16,12 @@ interface ModeToggleProps {
 export default function ModeToggle({ current, onChange, disabled }: ModeToggleProps) {
   return (
     <div
-      className="flex items-center gap-1 p-1 rounded-2xl"
+      className="flex items-center p-1.5 rounded-2xl relative"
       style={{
-        background: 'rgba(255,255,255,0.05)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        backdropFilter: 'blur(12px)',
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.06)',
+        backdropFilter: 'blur(16px)',
+        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.5)',
       }}
       role="tablist"
       aria-label="Mode selection"
@@ -36,22 +38,27 @@ export default function ModeToggle({ current, onChange, disabled }: ModeTogglePr
             disabled={disabled}
             title={mode.description}
             className={`
-              relative px-5 py-2.5 rounded-xl text-sm font-semibold
-              transition-all duration-300 ease-out
+              relative z-10 px-6 py-2.5 rounded-xl text-sm font-semibold
+              transition-colors duration-300 ease-out
               focus:outline-none focus:ring-2 focus:ring-violet-500/50
-              ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+              ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:text-white'}
             `}
             style={{
-              background: isActive
-                ? 'linear-gradient(135deg, #7c3aed, #6366f1)'
-                : 'transparent',
-              color: isActive ? '#fff' : 'rgba(255,255,255,0.5)',
-              boxShadow: isActive
-                ? '0 0 20px rgba(124, 58, 237, 0.4), inset 0 1px 0 rgba(255,255,255,0.15)'
-                : 'none',
+              color: isActive ? '#fff' : 'rgba(255,255,255,0.4)',
             }}
           >
-            {mode.label}
+            {isActive && (
+              <motion.div
+                layoutId="active-mode-pill"
+                className="absolute inset-0 rounded-xl"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.9), rgba(99, 102, 241, 0.9))',
+                  boxShadow: '0 0 20px rgba(124, 58, 237, 0.3), inset 0 1px 0 rgba(255,255,255,0.15)',
+                }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              />
+            )}
+            <span className="relative z-10 select-none tracking-wide">{mode.label}</span>
           </button>
         );
       })}
