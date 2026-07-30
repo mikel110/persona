@@ -1,11 +1,13 @@
 'use client';
 
 // ─── Speech Engine ─────────────────────────────────────────────────────────────
-// STT : Chrome Web Speech API (webkitSpeechRecognition) — zero latency, accurate
-// TTS : Unreal Speech API (/api/tts) — natural human voices with browser fallback
+// STT : Groq Whisper via MediaRecorder (Captures filler words perfectly)
+// TTS : Unreal Speech API (/api/tts)
 // UX  : Gemini-style Barge-in — user voice cuts AI speech & seamlessly captures full turn
 
-let mainRecognition: any = null;       // main STT for user turns
+let mainRecognition: any = null;       // for silence/VAD detection
+let mediaRecorder: MediaRecorder | null = null;
+let audioChunks: BlobPart[] = [];
 let interruptRecognition: any = null;  // background listener during AI speech
 let currentAudio: HTMLAudioElement | null = null;
 
@@ -13,13 +15,13 @@ function getSpeechRecognition(): any {
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 }
 
-// ── STT — Main listening ───────────────────────────────────────────────────────
+// ── STT — Main listening (MediaRecorder + Whisper) ───────────────────────────
 
-export function startListening(
+export async function startListening(
   onResult: (transcript: string) => void,
   onError: (err: string) => void,
   prefix: string = ''
-): void {
+): Promise<void> {
   stopListening();
 
   const SpeechRecognition = getSpeechRecognition();
@@ -28,78 +30,77 @@ export function startListening(
     return;
   }
 
-  mainRecognition = new SpeechRecognition();
-  mainRecognition.lang = 'en-US';
-  mainRecognition.continuous = true;
-  mainRecognition.interimResults = true;
-  mainRecognition.maxAlternatives = 1;
-
-  let silenceTimer: NodeJS.Timeout | null = null;
-  let finalTranscriptAccumulated = prefix ? prefix + ' ' : '';
-  let currentFullText = '';
-
-  mainRecognition.onresult = (event: any) => {
-    let interimTranscript = '';
-    let finalTranscript = '';
-
-    for (let i = event.resultIndex; i < event.results.length; ++i) {
-      if (event.results[i].isFinal) {
-        finalTranscript += event.results[i][0].transcript;
-      } else {
-        interimTranscript += event.results[i][0].transcript;
-      }
-    }
-
-    if (finalTranscript) {
-      finalTranscriptAccumulated += finalTranscript + ' ';
-    }
-    
-    currentFullText = (finalTranscriptAccumulated + interimTranscript).trim();
-
-    if (silenceTimer) clearTimeout(silenceTimer);
-    
-    if (currentFullText) {
-      // Reset the silence countdown
-      silenceTimer = setTimeout(() => {
-        stopListening(); // This nullifies handlers so onend won't fire
-        onResult(currentFullText);
-      }, 2500); // 2.5 seconds of silence
-    }
-  };
-
-  mainRecognition.onerror = (event: any) => {
-    if (silenceTimer) clearTimeout(silenceTimer);
-    if (event.error === 'no-speech') {
-      if (prefix) {
-        onResult(prefix.trim());
-      } else {
-        onError('No speech detected. Please try again.');
-      }
-    } else if (event.error === 'not-allowed') {
-      onError('Microphone access denied. Please allow it in Chrome settings.');
-    } else if (event.error === 'aborted') {
-      // User manually stopped or switched mode
-    } else {
-      onError(`Speech recognition error: ${event.error}`);
-    }
-  };
-
-  mainRecognition.onend = () => {
-    if (silenceTimer) clearTimeout(silenceTimer);
-    if (currentFullText) {
-      onResult(currentFullText);
-    } else if (prefix) {
-      onResult(prefix.trim());
-    } else {
-      // In case it silently stops without throwing no-speech
-      onError('No speech detected. Please try again.');
-    }
-  };
-
   try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) audioChunks.push(event.data);
+    };
+
+    let silenceTimer: NodeJS.Timeout | null = null;
+
+    mediaRecorder.onstop = async () => {
+      // Clean up tracks
+      stream.getTracks().forEach((track) => track.stop());
+
+      if (audioChunks.length === 0) {
+        if (prefix) onResult(prefix.trim());
+        else onError('No speech detected. Please try again.');
+        return;
+      }
+
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+
+      try {
+        const res = await fetch('/api/stt', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('Whisper API failed');
+        const data = await res.json();
+        
+        let finalText = data.transcript?.trim() || '';
+        if (prefix) finalText = prefix + ' ' + finalText;
+        
+        if (finalText) {
+          onResult(finalText);
+        } else {
+          onError('No speech detected. Please try again.');
+        }
+      } catch (err) {
+        console.error('STT Error:', err);
+        onError('Transcription failed. Please try again.');
+      }
+    };
+
+    // We use Web Speech API purely as a Voice Activity Detector (VAD) / Silence detector
+    mainRecognition = new SpeechRecognition();
+    mainRecognition.lang = 'en-US';
+    mainRecognition.continuous = true;
+    mainRecognition.interimResults = true;
+
+    mainRecognition.onresult = () => {
+      // Whenever speech is detected, reset the 2.5s silence timer
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        stopListening(); // This stops the MediaRecorder and triggers onstop
+      }, 2500);
+    };
+
+    mainRecognition.onerror = (event: any) => {
+      if (event.error === 'no-speech') {
+        // If webkit fails to detect speech at all, rely on our prefix or just error
+        if (prefix) stopListening(); 
+      }
+    };
+
+    mediaRecorder.start();
     mainRecognition.start();
-  } catch (e) {
-    console.error('Error starting main recognition:', e);
+
+  } catch (err) {
+    console.error('Mic error:', err);
+    onError('Microphone access denied or error starting recording.');
   }
 }
 
@@ -112,6 +113,12 @@ export function stopListening(): void {
       mainRecognition.abort();
     } catch { /* ignore */ }
     mainRecognition = null;
+  }
+  
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try {
+      mediaRecorder.stop();
+    } catch { /* ignore */ }
   }
 }
 
@@ -210,7 +217,9 @@ export async function speak(
       });
 
       if (!res.ok) {
-        console.warn('[TTS] API failed, using browser fallback');
+        const errorText = await res.text();
+        console.warn('[TTS] API failed, using browser fallback', errorText);
+        alert(`[TTS] Server Error: The TTS API returned ${res.status}. Falling back to robotic voice.`);
         await speakFallback(text, onEnd, onInterrupt);
         resolve();
         return;
@@ -245,11 +254,13 @@ export async function speak(
         }
       }).catch((err) => {
         console.warn('[TTS] Audio play rejected (autoplay blocked?), falling back', err);
+        alert(`[TTS] Audio play failed: ${err.message || err}. Falling back to robotic voice.`);
         URL.revokeObjectURL(url);
         speakFallback(text, onEnd, onInterrupt).then(resolve);
       });
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[TTS] Error:', err);
+      alert(`[TTS] Fetch Error: ${err.message || err}. Falling back to robotic voice.`);
       await speakFallback(text, onEnd, onInterrupt);
       resolve();
     }

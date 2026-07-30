@@ -8,16 +8,17 @@ import ScorecardOverlay from '@/components/ScorecardOverlay';
 import TranscriptPanel from '@/components/TranscriptPanel';
 import ConceptTracker from '@/components/ConceptTracker';
 import { teachItMode } from '@/lib/modes/teachIt';
-import { socraticMode } from '@/lib/modes/socratic';
+import { quizzerMode } from '@/lib/modes/quizzer';
 import { sendMessage } from '@/lib/chatEngine';
 import { scoreSession } from '@/lib/scoringEngine';
 import { startListening, stopListening, speak, cancelSpeaking } from '@/lib/speechEngine';
 import type { AppState, Message, ModeId } from '@/types';
 
-const MODES = { 'teach-it': teachItMode, 'socratic': socraticMode };
+const MODES = { 'teach-it': teachItMode, 'quizzer': quizzerMode };
 
-// Regex to extract [COVERED: concept_name] tags from AI replies
+// Regex to extract [COVERED: concept_name] and [SHAKY: concept_name] tags from AI replies
 const COVERED_REGEX = /\[COVERED:\s*([^\]]+)\]/gi;
+const SHAKY_REGEX = /\[SHAKY:\s*([^\]]+)\]/gi;
 
 const initialState: AppState = {
   mode: 'teach-it',
@@ -25,6 +26,7 @@ const initialState: AppState = {
   material: '',
   concepts: [],
   coveredConcepts: [],
+  shakyConcepts: [],
   messages: [],
   scoreCard: null,
   sessionActive: false,
@@ -85,10 +87,13 @@ export default function PersonaApp() {
         body: JSON.stringify({ text }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error?.message || data.error || 'Failed to extract concepts');
+      }
       setState((s) => ({ ...s, concepts: data.concepts ?? [], isUploading: false }));
-    } catch {
+    } catch (err: any) {
       setState((s) => ({ ...s, isUploading: false }));
-      setError('Failed to extract concepts. Check your Groq API key.');
+      setError(err?.message || 'Failed to extract concepts. Check your Groq API key.');
     }
   }, []);
 
@@ -115,30 +120,45 @@ export default function PersonaApp() {
 
       // ── Parse [COVERED: concept] tags from AI reply ──────────────────────
       const newlyCovered: string[] = [];
-      let match;
-      const regex = new RegExp(COVERED_REGEX.source, 'gi');
-      while ((match = regex.exec(rawReply)) !== null) {
-        newlyCovered.push(match[1].trim());
+      let matchCovered;
+      const regexCovered = new RegExp(COVERED_REGEX.source, 'gi');
+      while ((matchCovered = regexCovered.exec(rawReply)) !== null) {
+        newlyCovered.push(matchCovered[1].trim());
+      }
+
+      // ── Parse [SHAKY: concept] tags from AI reply ────────────────────────
+      const newlyShaky: string[] = [];
+      let matchShaky;
+      const regexShaky = new RegExp(SHAKY_REGEX.source, 'gi');
+      while ((matchShaky = regexShaky.exec(rawReply)) !== null) {
+        newlyShaky.push(matchShaky[1].trim());
       }
 
       // Strip tags from displayed/spoken text
-      const cleanReply = rawReply.replace(COVERED_REGEX, '').replace(/\n{3,}/g, '\n\n').trim();
+      const cleanReply = rawReply
+        .replace(COVERED_REGEX, '')
+        .replace(SHAKY_REGEX, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 
       const aiMsg: Message = { role: 'assistant', content: cleanReply, timestamp: Date.now() };
-      setState((s) => ({
-        ...s,
-        messages: [...updatedHistory, aiMsg],
-        // Merge newly covered concepts (de-duplicate, case-insensitive match)
-        coveredConcepts: newlyCovered.length > 0
-          ? [...new Set([
-              ...s.coveredConcepts,
-              // Match against exact concept names from the list (fuzzy match)
-              ...concepts.filter((c) =>
-                newlyCovered.some((n) => c.toLowerCase() === n.toLowerCase() || c.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(c.toLowerCase()))
-              ),
-            ])]
-          : s.coveredConcepts,
-      }));
+      
+      setState((s) => {
+        // Fuzzy match newly detected concepts against tracked concepts
+        const matchedCovered = concepts.filter((c) =>
+          newlyCovered.some((n) => c.toLowerCase() === n.toLowerCase() || c.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(c.toLowerCase()))
+        );
+        const matchedShaky = concepts.filter((c) =>
+          newlyShaky.some((n) => c.toLowerCase() === n.toLowerCase() || c.toLowerCase().includes(n.toLowerCase()) || n.toLowerCase().includes(c.toLowerCase()))
+        );
+
+        return {
+          ...s,
+          messages: [...updatedHistory, aiMsg],
+          coveredConcepts: [...new Set([...s.coveredConcepts, ...matchedCovered])],
+          shakyConcepts: [...new Set([...s.shakyConcepts, ...matchedShaky])],
+        };
+      });
 
       setMicState('speaking');
       await speak(
@@ -215,7 +235,7 @@ export default function PersonaApp() {
     }));
   }, []);
 
-  const { mode, micState, concepts, coveredConcepts, isUploading, uploadedFileName, scoreCard, sessionActive, error, messages } = state;
+  const { mode, micState, concepts, coveredConcepts, shakyConcepts, isUploading, uploadedFileName, scoreCard, sessionActive, error, messages } = state;
   const isProcessing = micState === 'thinking' || micState === 'speaking' || isScoringLoading;
 
   return (
@@ -236,6 +256,7 @@ export default function PersonaApp() {
       <ConceptTracker
         concepts={concepts}
         coveredConcepts={coveredConcepts}
+        shakyConcepts={shakyConcepts}
         isSessionActive={sessionActive}
       />
 

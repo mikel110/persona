@@ -2,9 +2,9 @@
 
 import { ModeId } from '@/types';
 import { teachItMode } from '@/lib/modes/teachIt';
-import { socraticMode } from '@/lib/modes/socratic';
+import { quizzerMode } from '@/lib/modes/quizzer';
 
-const modes = [teachItMode, socraticMode];
+const modes = [teachItMode, quizzerMode];
 
 interface ModeToggleProps {
   current: ModeId;

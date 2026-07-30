@@ -8,32 +8,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No text provided' }, { status: 400 });
     }
 
-    const apiKey = process.env.UNREALSPEECH_API_KEY;
+    const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: 'UNREALSPEECH_API_KEY not configured' }, { status: 500 });
+      return NextResponse.json({ error: 'ELEVENLABS_API_KEY not configured' }, { status: 500 });
     }
 
-    // Unreal Speech streaming endpoint
-    // Voice options: Scarlett, Dan, Will, Liv, Amy
-    const response = await fetch('https://api.v7.unrealspeech.com/stream', {
+    // ElevenLabs streaming endpoint
+    // Voice ID: Bella (free tier default) or loaded from env
+    const voiceId = process.env.ELEVENLABS_VOICE_ID ?? 'EXAVITQu4vr4xnSDxMaL'; 
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        'xi-api-key': apiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        Text: text,
-        VoiceId: process.env.UNREALSPEECH_VOICE_ID ?? 'Scarlett',
-        Bitrate: '192k',
-        Speed: '0',
-        Pitch: '1',
-        Codec: 'libmp3lame',
+        text: text,
+        model_id: 'eleven_turbo_v2_5', // Fastest, highly conversational model
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error('[/api/tts] Unreal Speech error:', errText);
+      console.error('[/api/tts] ElevenLabs error:', errText);
       return NextResponse.json({ error: 'TTS generation failed' }, { status: 500 });
     }
 

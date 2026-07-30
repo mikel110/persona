@@ -5,10 +5,11 @@ import { useState, useEffect, useRef } from 'react';
 interface ConceptTrackerProps {
   concepts: string[];
   coveredConcepts: string[];
+  shakyConcepts: string[];
   isSessionActive: boolean;
 }
 
-export default function ConceptTracker({ concepts, coveredConcepts, isSessionActive }: ConceptTrackerProps) {
+export default function ConceptTracker({ concepts, coveredConcepts, shakyConcepts, isSessionActive }: ConceptTrackerProps) {
   const [expanded, setExpanded] = useState(true);
   const [newlyCovered, setNewlyCovered] = useState<Set<string>>(new Set());
   const prevCoveredRef = useRef<string[]>([]);
@@ -26,7 +27,8 @@ export default function ConceptTracker({ concepts, coveredConcepts, isSessionAct
 
   if (!isSessionActive || concepts.length === 0) return null;
 
-  const covered = coveredConcepts.length;
+  const combinedCovered = new Set([...coveredConcepts, ...shakyConcepts]);
+  const covered = combinedCovered.size;
   const total = concepts.length;
   const pct = Math.round((covered / total) * 100);
 
@@ -110,18 +112,24 @@ export default function ConceptTracker({ concepts, coveredConcepts, isSessionAct
         {expanded && (
           <div className="flex flex-col gap-0.5 pb-3 px-2 max-h-64 overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
             {concepts.map((concept) => {
-              const isCovered = coveredConcepts.includes(concept);
-              const isNew = newlyCovered.has(concept);
+              const isMastered = coveredConcepts.includes(concept);
+              const isShaky = !isMastered && shakyConcepts.includes(concept);
+              const isCovered = isMastered || isShaky;
+              const isNew = newlyCovered.has(concept) || shakyConcepts.includes(concept) && !prevCoveredRef.current.includes(concept);
 
               return (
                 <div
                   key={concept}
                   className="flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all duration-400"
                   style={{
-                    background: isNew
-                      ? 'rgba(124, 58, 237, 0.25)'
-                      : isCovered
-                      ? 'rgba(124, 58, 237, 0.08)'
+                    background: isNew && isMastered
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : isNew && isShaky
+                      ? 'rgba(251, 191, 36, 0.15)'
+                      : isMastered
+                      ? 'rgba(16, 185, 129, 0.08)'
+                      : isShaky
+                      ? 'rgba(251, 191, 36, 0.08)'
                       : 'transparent',
                     transform: isNew ? 'scale(1.02)' : 'scale(1)',
                   }}
@@ -132,14 +140,19 @@ export default function ConceptTracker({ concepts, coveredConcepts, isSessionAct
                     style={{
                       width: 16,
                       height: 16,
-                      background: isCovered ? 'rgba(124, 58, 237, 0.9)' : 'rgba(255,255,255,0.06)',
+                      background: isMastered ? 'rgba(16, 185, 129, 0.9)' : isShaky ? 'rgba(251, 191, 36, 0.9)' : 'rgba(255,255,255,0.06)',
                       border: isCovered ? 'none' : '1px solid rgba(255,255,255,0.15)',
-                      boxShadow: isNew ? '0 0 8px rgba(124,58,237,0.6)' : 'none',
+                      boxShadow: isNew && isMastered ? '0 0 8px rgba(16,185,129,0.6)' : isNew && isShaky ? '0 0 8px rgba(251,191,36,0.6)' : 'none',
                     }}
                   >
-                    {isCovered && (
+                    {isMastered && (
                       <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
                         <path d="M1.5 4L3 5.5L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                    {isShaky && (
+                      <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                        <circle cx="4" cy="4" r="1.5" fill="white" />
                       </svg>
                     )}
                   </div>
