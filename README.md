@@ -39,11 +39,8 @@ npm install
 Create a `.env.local` file in the root of the project and add your API keys:
 
 ```env
-# Required for ultra-fast Llama-3 inference (Chat, Concept Extraction, Scoring)
+# Required for ultra-fast Llama-3 inference and Whisper transcription
 GROQ_API_KEY=your_groq_api_key_here
-
-# Required for Whisper Speech-to-Text (Transcription)
-OPENAI_API_KEY=your_openai_api_key_here
 
 # Required for Sophia's voice (Text-to-Speech)
 ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
