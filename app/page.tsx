@@ -1,18 +1,19 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import MicButton from '@/components/MicButton';
 import ModeToggle from '@/components/ModeToggle';
 import FileUpload from '@/components/FileUpload';
 import ScorecardOverlay from '@/components/ScorecardOverlay';
 import TranscriptPanel from '@/components/TranscriptPanel';
 import ConceptTracker from '@/components/ConceptTracker';
+import HistoryPanel from '@/components/HistoryPanel';
 import { teachItMode } from '@/lib/modes/teachIt';
 import { quizzerMode } from '@/lib/modes/quizzer';
 import { sendMessage } from '@/lib/chatEngine';
 import { scoreSession } from '@/lib/scoringEngine';
 import { startListening, stopListening, speak, cancelSpeaking } from '@/lib/speechEngine';
-import type { AppState, Message, ModeId } from '@/types';
+import type { AppState, Message, ModeId, SavedSession } from '@/types';
 
 const MODES = { 'teach-it': teachItMode, 'quizzer': quizzerMode };
 
@@ -39,14 +40,42 @@ export default function PersonaApp() {
   const [state, setState] = useState<AppState>(initialState);
   const [showTranscript, setShowTranscript] = useState(false);
   const [isScoringLoading, setIsScoringLoading] = useState(false);
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Load history on mount
+  useEffect(() => {
+    const raw = localStorage.getItem('persona_sessions');
+    if (raw) {
+      try {
+        setSavedSessions(JSON.parse(raw));
+      } catch (e) {
+        console.error('Failed to parse saved sessions', e);
+      }
+    }
+  }, []);
 
   const setMicState = (micState: AppState['micState']) =>
     setState((s) => ({ ...s, micState }));
 
   const setError = (error: string | null) =>
     setState((s) => ({ ...s, error }));
+
+  const handleDeleteSession = useCallback((id: string) => {
+    setSavedSessions((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      localStorage.setItem('persona_sessions', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const handleSelectSession = useCallback((session: SavedSession) => {
+    setState((s) => ({ ...s, scoreCard: session.scoreCard }));
+    setShowHistory(false);
+  }, []);
 
   // ── Auto-resume listening after each AI turn ──────────────────────────────
   const resumeListening = useCallback((prefix: string = '') => {
@@ -213,8 +242,24 @@ export default function PersonaApp() {
 
     try {
       const scoreCard = await scoreSession(messages, modeConfig.scoringPrompt);
+      const newSession: SavedSession = {
+        id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+        timestamp: Date.now(),
+        fileName: stateRef.current.uploadedFileName,
+        mode: stateRef.current.mode,
+        scoreCard,
+        messages,
+      };
+      
+      setSavedSessions((prev) => {
+        const updated = [newSession, ...prev];
+        localStorage.setItem('persona_sessions', JSON.stringify(updated));
+        return updated;
+      });
+
       setState((s) => ({ ...s, scoreCard, sessionActive: false, micState: 'idle' }));
-    } catch {
+    } catch (err) {
+      console.error(err);
       setError('Failed to score session. Please try again.');
       setMicState('idle');
     } finally {
@@ -337,6 +382,25 @@ export default function PersonaApp() {
         )}
       </div>
 
+      {/* History toggle (Top Right) */}
+      {!sessionActive && !showHistory && (
+        <div className="fixed top-6 right-6 z-30">
+          <button
+            id="show-history-btn"
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all duration-300 hover:scale-[1.02]"
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              color: 'rgba(255,255,255,0.4)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            📊 History ({savedSessions.length})
+          </button>
+        </div>
+      )}
+
       {/* Transcript toggle */}
       {messages.length > 0 && !showTranscript && (
         <div className="fixed bottom-6 right-6 z-30">
@@ -358,6 +422,15 @@ export default function PersonaApp() {
 
       {showTranscript && (
         <TranscriptPanel messages={messages} onClose={() => setShowTranscript(false)} />
+      )}
+
+      {showHistory && (
+        <HistoryPanel
+          sessions={savedSessions}
+          onClose={() => setShowHistory(false)}
+          onDeleteSession={handleDeleteSession}
+          onSelectSession={handleSelectSession}
+        />
       )}
 
       {scoreCard && (

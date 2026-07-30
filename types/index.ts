@@ -35,6 +35,15 @@ export interface ScoreCard {
   fluencyStats?: FluencyStats;
 }
 
+export interface SavedSession {
+  id: string;
+  timestamp: number;
+  fileName: string;
+  mode: ModeId;
+  scoreCard: ScoreCard;
+  messages: Message[];
+}
+
 export interface ModeConfig {
   id: ModeId;
   label: string;

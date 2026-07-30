@@ -171,22 +171,29 @@ export default function ScorecardOverlay({ scoreCard, onNewSession }: ScorecardO
           </div>
         )}
 
-        {/* Strengths & Improvements */}
         <div className="grid grid-cols-2 gap-3">
           <div className="p-4 rounded-2xl" style={{ background: 'rgba(34, 197, 94, 0.06)', border: '1px solid rgba(34, 197, 94, 0.15)' }}>
             <p className="text-xs font-bold mb-2" style={{ color: '#86efac' }}>✓ Strengths</p>
             <ul className="space-y-1">
-              {scoreCard.strengths.map((s, i) => (
-                <li key={i} className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>• {s}</li>
-              ))}
+              {scoreCard.strengths && scoreCard.strengths.length > 0 ? (
+                scoreCard.strengths.map((s, i) => (
+                  <li key={i} className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>• {s}</li>
+                ))
+              ) : (
+                <li className="text-xs italic" style={{ color: 'rgba(255,255,255,0.3)' }}>No strengths recorded. Speak at greater length to show mastery.</li>
+              )}
             </ul>
           </div>
           <div className="p-4 rounded-2xl" style={{ background: 'rgba(251, 191, 36, 0.06)', border: '1px solid rgba(251, 191, 36, 0.15)' }}>
             <p className="text-xs font-bold mb-2" style={{ color: '#fde68a' }}>↑ Improve</p>
             <ul className="space-y-1">
-              {scoreCard.improvements.map((s, i) => (
-                <li key={i} className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>• {s}</li>
-              ))}
+              {scoreCard.improvements && scoreCard.improvements.length > 0 ? (
+                scoreCard.improvements.map((s, i) => (
+                  <li key={i} className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>• {s}</li>
+                ))
+              ) : (
+                <li className="text-xs italic" style={{ color: 'rgba(255,255,255,0.3)' }}>Perfect session! No improvements suggested.</li>
+              )}
             </ul>
           </div>
         </div>
