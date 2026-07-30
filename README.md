@@ -14,7 +14,7 @@ Persona is a next-generation AI study companion that uses real-time conversation
 - **Framework**: Next.js 15 (App Router)
 - **Styling**: Tailwind CSS v4 & Framer Motion for organic, liquid animations
 - **LLM Engine**: Groq (Llama 3 70B) for ultra-low latency conversational responses
-- **Speech-to-Text (STT)**: OpenAI Whisper
+- **Speech-to-Text (STT)**: Whisper (via Groq)
 - **Text-to-Speech (TTS)**: ElevenLabs
 
 ## ⚙️ Getting Started (BYOK)
