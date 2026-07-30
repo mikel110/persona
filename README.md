@@ -1,65 +1,180 @@
 # Persona 🧠🎙️
 
-Persona is a next-generation AI study companion that uses real-time conversational voice interaction to help you master concepts through the **Feynman Technique** and **Oral Flashcards**. Built with Next.js 15, Groq, and ElevenLabs, Persona creates an incredibly fast, dynamic, and beautiful learning environment.
+> *You think you know it — until someone asks you to explain it.*
 
-## 🚀 Features
+Persona is a real-time AI voice study companion built on the Feynman Technique. Instead of passively re-reading notes, you speak out loud to an AI peer named Sophia who asks focused follow-up questions, probes your understanding, and tells you exactly where your knowledge breaks down — before the exam does.
 
-- **Teach-It Mode (Feynman Technique)**: Explain complex topics to "Sophia", a genuinely curious AI peer. If you can't explain it simply, you don't understand it well enough! Sophia will ask targeted follow-up questions to expose your knowledge gaps.
-- **Quizzer Mode (Oral Flashcards)**: Upload your study notes and Persona will rapid-fire test you on key concepts, evaluating your answers in real-time.
-- **Advanced Fluency Analytics**: Real-time evaluation of your hesitation density, filler word usage (ums, uhs), and concept mastery.
-- **Exportable Scorecards**: Download a beautiful, dynamic PDF summarizing your session, highlighting your strengths, areas for improvement, and providing a custom-generated Targeted Revision Q&A based on what you missed.
+---
 
-## 🛠️ Tech Stack
+## Table of Contents
 
-- **Framework**: Next.js 15 (App Router)
-- **Styling**: Tailwind CSS v4 & Framer Motion for organic, liquid animations
-- **LLM Engine**: Groq (Llama 3 70B) for ultra-low latency conversational responses
-- **Speech-to-Text (STT)**: Whisper (via Groq)
-- **Text-to-Speech (TTS)**: ElevenLabs
+- [What is Persona?](#what-is-persona)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Environment Variables (BYOK)](#environment-variables-byok)
+- [Running Locally](#running-locally)
+- [Project Structure](#project-structure)
+- [How it Works](#how-it-works)
 
-## ⚙️ Getting Started (BYOK)
+---
 
-Persona operates on a **Bring Your Own Key (BYOK)** model. To run this project locally, you will need API keys from Groq, OpenAI, and ElevenLabs.
+## What is Persona?
 
-### 1. Clone the repository
+Most students study by reading — and reading feels productive, but it creates a false sense of understanding. Your brain recognises the words on the page without truly internalising them.
+
+**Persona forces active recall.** You explain, you answer, you defend your understanding out loud. The AI listens, evaluates, and pushes back — just like a real study partner who genuinely doesn't get it yet.
+
+There are two modes:
+
+- **Teach-It (Feynman Technique):** Explain a concept to Sophia. She asks follow-up questions until she's satisfied you truly understand it — not just that you can recite it.
+- **Quizzer (Oral Flashcards):** Upload your notes. Persona fires rapid-fire oral questions at you and scores every answer in real time.
+
+At the end of every session, you receive a detailed **scorecard** — including fluency analytics, mastered vs. shaky concepts, and a custom set of **Targeted Revision Q&As** generated specifically from your weak points. Download it all as a PDF.
+
+---
+
+## Features
+
+- 🎙️ **Real-time voice conversation** with ultra-low latency
+- 🧠 **Feynman Technique** — teach-back sessions with Sophia
+- ⚡ **Oral Flashcards** — rapid-fire quiz mode from your own notes
+- 📊 **Fluency analytics** — hesitation density, filler word tracking (um, uh, like), concept mastery
+- 🗂️ **Concept checklist** — live tracker of covered and shaky concepts
+- 📄 **PDF Scorecard export** — download your full session summary with targeted revision Q&As
+- 💾 **Session history** — review past sessions and scorecards
+- 🌙 **Dark-mode first UI** with organic mic orb animations
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| Language | TypeScript |
+| Styling | Tailwind CSS v4 |
+| Animations | Framer Motion |
+| LLM Inference | Groq — Llama 3.3 70B |
+| Speech-to-Text | Whisper large-v3 (via Groq) |
+| Text-to-Speech | ElevenLabs (eleven_turbo_v2_5) |
+| PDF Export | html-to-image + jsPDF |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18 or higher
+- npm
+- A **Groq** API key — [console.groq.com](https://console.groq.com)
+- An **ElevenLabs** API key — [elevenlabs.io](https://elevenlabs.io)
+
+### Clone & Install
 
 ```bash
-git clone https://github.com/yourusername/persona.git
+git clone https://github.com/mikel110/persona.git
 cd persona
-```
-
-### 2. Install Dependencies
-
-```bash
 npm install
 ```
 
-### 3. Configure Environment Variables
+---
 
-Create a `.env.local` file in the root of the project and add your API keys:
+## Environment Variables (BYOK)
 
-```env
-# Required for ultra-fast Llama-3 inference and Whisper transcription
-GROQ_API_KEY=your_groq_api_key_here
+Persona is **Bring Your Own Key (BYOK)**. It does not ship with any API keys. You need to provide your own from Groq and ElevenLabs.
 
-# Required for Sophia's voice (Text-to-Speech)
-ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+Create a file called `.env.local` in the root of the project:
+
+```bash
+touch .env.local
 ```
 
-### 4. Run the Development Server
+Then add the following:
+
+```env
+# ── Groq ─────────────────────────────────────────────────────────────────────
+# Used for: Llama 3.3 70B (chat + scoring) and Whisper large-v3 (transcription)
+# Get your key at: https://console.groq.com
+GROQ_API_KEY=your_groq_api_key_here
+
+# ── ElevenLabs ────────────────────────────────────────────────────────────────
+# Used for: Sophia's voice (Text-to-Speech streaming)
+# Get your key at: https://elevenlabs.io
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+# ── ElevenLabs Voice ID (optional) ───────────────────────────────────────────
+# Defaults to "Bella" if not set. Swap in any ElevenLabs voice ID you prefer.
+# ELEVENLABS_VOICE_ID=your_voice_id_here
+```
+
+> **Note:** You do NOT need an OpenAI API key. Whisper transcription runs entirely through Groq's API.
+
+---
+
+## Running Locally
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to start a session.
-
-## 📸 Usage Tips
-
-- **Click the Mic Orb**: The glowing central orb is your lifeline. Tap it to start the session, or tap it while you are speaking to manually send your audio early.
-- **Stay Engaged**: Persona tracks how long you pause. If you stop speaking for a few seconds, Persona will automatically assume you're finished and respond.
-- **Download your Scorecard**: Always hit "Download PDF" at the end of a session to save your Targeted Revision Q&A!
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-*Built for speed, fluency, and deep learning.*
+## Project Structure
+
+```
+persona/
+├── app/
+│   ├── api/
+│   │   ├── chat/          # LLM chat completions (Groq / Llama 3)
+│   │   ├── extract-concepts/  # Auto-extracts key concepts from uploaded notes
+│   │   ├── score/         # End-of-session scoring and fluency analytics
+│   │   ├── stt/           # Speech-to-Text (Whisper via Groq)
+│   │   └── tts/           # Text-to-Speech (ElevenLabs streaming)
+│   ├── layout.tsx
+│   └── page.tsx           # Main session state and UI orchestration
+├── components/
+│   ├── MicButton.tsx      # Animated mic orb (idle / listening / thinking / speaking)
+│   ├── LiveSubtitle.tsx   # Real-time sentence-by-sentence subtitle display
+│   └── ScorecardOverlay.tsx  # End-of-session scorecard + PDF export
+├── lib/
+│   ├── modes/
+│   │   ├── teachIt.ts     # Feynman Technique mode config + prompts
+│   │   └── quizzer.ts     # Oral Flashcards mode config + prompts
+│   └── speechEngine.ts    # Voice recording, STT polling, TTS playback
+└── types/
+    └── index.ts           # Shared TypeScript types
+```
+
+---
+
+## How it Works
+
+### Voice Pipeline
+
+```
+Microphone → WebM recording → /api/stt (Whisper via Groq)
+    → transcript → /api/chat (Llama 3.3 70B via Groq)
+    → AI response → /api/tts (ElevenLabs streaming)
+    → Audio playback
+```
+
+### Scoring Pipeline
+
+When you end a session, the full conversation transcript is sent to `/api/score`. The scoring engine:
+
+1. Deterministically counts total words, filler words (um, uh, like, you know), and calculates hesitation density.
+2. Penalises sessions where the student spoke fewer than 40 words (capped at 4/10).
+3. Applies fluency bonuses or penalties based on hesitation density thresholds.
+4. Passes all metrics plus the transcript to Llama 3 to generate qualitative feedback, strengths, improvements, and targeted revision Q&As.
+
+### Concept Tracking
+
+Both modes use special tags in the AI's responses:
+- `[COVERED: concept_name]` — marks a concept as successfully explained/answered
+- `[SHAKY: concept_name]` — marks a concept as hesitant or incorrect
+
+These tags are parsed in real time and update the live concept checklist on-screen.
