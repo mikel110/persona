@@ -33,7 +33,6 @@ async function readPdfFile(file: File): Promise<string> {
   const pdf = await pdfjsLib.getDocument({ 
     data: new Uint8Array(arrayBuffer),
     useWorkerFetch: false,
-    isEvalSupported: false,
     standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`
   }).promise;
 
