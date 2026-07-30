@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
       model: 'whisper-large-v3',
       response_format: 'json',
       language: 'en',
+      prompt: 'um, uh, like, you know, hmm, ah, er.', // Crucial: forces Whisper to keep filler words!
     });
 
     return NextResponse.json({ transcript: transcription.text });

@@ -28,6 +28,10 @@ YOUR RULES:
 CONCEPT COVERAGE:
 When the user has explained a concept in their OWN words with genuine clarity and depth — not just mentioned the word — add this on its own final line:
 [COVERED: exact_concept_name]
+
+If they explained the concept but used a lot of filler words, hesitated heavily, or sounded very uncertain, use this tag instead:
+[SHAKY: exact_concept_name]
+
 Only one concept per response. Only mark it when you are genuinely satisfied with their explanation of that specific concept.
 
 MATERIAL:
@@ -50,10 +54,19 @@ Return a JSON object with EXACTLY this structure:
     { "name": "Examples", "score": <0-10>, "feedback": "<specific 1-sentence observation>" },
     { "name": "Precision", "score": <0-10>, "feedback": "<specific 1-sentence observation>" }
   ],
+  "fluencyStats": {
+    "totalWordsSpoken": <total words spoken by student>,
+    "fillerCount": <number of filler words used>,
+    "hesitationDensity": <hesitation density percentage>,
+    "hesitationScore": <0-10 based on fluency and confidence>,
+    "shakyConcepts": ["concept name"],
+    "masteredConcepts": ["concept name"],
+    "speechAnalysis": "<1-2 sentences analyzing their confidence, hesitation, and pacing>"
+  },
   "strengths": ["<specific strength>", "<specific strength>"],
   "improvements": ["<specific actionable improvement>", "<specific actionable improvement>"],
   "summary": "<2 sentences: what they explained well and one concrete thing to work on next time>"
 }
 
-Judge on: How clearly they explained concepts in plain language. Whether they used real-world examples. Whether they could define terms without jargon. The depth of understanding behind their words. Return ONLY the JSON object, no extra text.`,
+Judge on: How clearly they explained concepts in plain language. Whether they used real-world examples. Whether they could define terms without jargon. The depth of understanding behind their words. For fluencyStats, analyze their use of filler words (um, uh, like) and overall confidence. Return ONLY the JSON object, no extra text.`,
 };
